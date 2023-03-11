@@ -1,50 +1,80 @@
 #pragma once
 
-/// @file
-/// @brief 
-
-#include <json/detail/json_convert_from.h>
-#include <json/detail/json_convert_to.h>
-
-template<typename... T>
-constexpr std::array< typename std::common_type_t< T... >, sizeof...( T ) > make_array( T&&...t )
-{
-    return { std::forward< T >( t )... };
-}
+#include <json/json_base.h>
+#include <stdexcept>
 
 namespace json
 {
 
-template< std::size_t S, typename... Types >
-void FromJson( const nlohmann::json& json, const std::array< const char*, S >& names, Types&... args )
+template< typename T >
+constexpr std::pair< T*, const char* > bind( T& v, const char* n )
 {
-    static_assert( names.size() == sizeof...( Types ) );
-    FromJson( json, std::cbegin( names ), args... );
+    return { &v, n };
 }
 
-template< std::size_t S, typename... Types >
-void ToJson( const std::array< const char*, S >& names, nlohmann::json& json, const Types&... args )
+template< typename T >
+void ToJson( JsonRef& jsonValue, const std::pair< T*, const char* > t )
 {
-    static_assert( S == sizeof...( Types ) );
-    ToJson( std::cbegin( names ), json, args... );
+    auto& json = *jsonValue;
+    const auto& inValue = *t.first;
+    auto key = t.second;
+
+    if constexpr( IsOptional<T> )
+    {
+        if ( inValue.has_value() )
+        {
+            auto j = JsonRef( json[key] );
+            ToJson( inValue.value(), j );
+        }
+    }
+    else
+    {
+        auto j = JsonRef( json[key] );
+        ToJson( inValue, j );
+    }
+
 }
 
 template< typename... Types >
-void ToJson( nlohmann::json& json, const Types&... args )
+void ToJson( JsonRef& json, const Types... args )
 {
-    ToJson( json, args... );
+    ( ToJson( json, args ), ... );
 }
 
-//void Validate( const std::string& str, const char* name, std::size_t maxLength );
+template< typename T >
+void FromJson( const JsonConstRef& jsonValue, std::pair< T*, const char* > t )
+{
+    const auto& json = *jsonValue;
+    auto& outValue = *t.first;
+    auto key = t.second;
 
-//template< typename T >
-//struct JsonConverter
-//{
-    //static T FromJson( const nlohmann::json& json )
-    //{
-        //auto names = T::names_;
-        //FromJson( json, names )
-    //}
-//};
+    if constexpr( IsOptional<T> )
+    {
+        if ( !json.contains(key) || json[key].is_null() )
+        {
+            outValue.reset();
+        }
+        else
+        {
+            outValue = typename T::value_type{};
+            FromJson( JsonConstRef( json[key] ), outValue.value() );
+        }
+    }
+    else
+    {
+        if ( !json.contains(key) || json[key].is_null() )
+        {
+            auto s = std::string(key) + ": not found";
+            throw std::runtime_error(s);
+        }
+        FromJson( JsonConstRef( json[key] ), outValue );
+    }
+}
+
+template< typename... Types >
+void FromJson( const JsonConstRef& json, Types... args )
+{
+    ( FromJson( json, args ), ... );
+}
 
 }
